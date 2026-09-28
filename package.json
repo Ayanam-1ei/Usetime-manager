@@ -4,6 +4,8 @@
   "description": "Windows 屏幕使用时长统计",
   "main": "electron/main.cjs",
   "private": true,
+  "author": "Ayanam-1ei",
+  "license": "MIT",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -11,7 +13,9 @@
     "start": "electron .",
     "fix-electron": "node scripts/fix-electron.cjs",
     "electron:dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && electron .\"",
-    "electron:build": "vite build && electron ."
+    "electron:build": "vite build && electron .",
+    "dist": "npm run build && electron-builder --win",
+    "dist:portable": "npm run build && electron-builder --win portable"
   },
   "dependencies": {
     "koffi": "^2.9.0",
@@ -25,9 +29,55 @@
     "@vitejs/plugin-react": "^4.3.4",
     "concurrently": "^9.1.0",
     "electron": "^33.2.1",
+    "electron-builder": "^26.15.3",
     "typescript": "^5.7.2",
     "vite": "^6.0.6",
     "wait-on": "^8.0.1"
   },
-  "allowScripts": {}
+  "allowScripts": {
+    "electron": true,
+    "esbuild": true,
+    "koffi": true,
+    "electron-winstaller": true
+  },
+  "build": {
+    "appId": "com.ayanam.usetime",
+    "productName": "UsetimeManager",
+    "copyright": "Copyright © 2026",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**/*",
+      "dist/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "屏幕使用时长"
+    },
+    "portable": {
+      "artifactName": "UsetimeManager-${version}-portable.exe"
+    },
+    "asar": true,
+    "asarUnpack": [
+      "**/node_modules/koffi/**"
+    ]
+  }
 }

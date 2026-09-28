@@ -27,6 +27,21 @@ npm run dev                 # 终端 1：Vite
 npm run electron:dev        # 终端 2：Electron 连 Vite
 ```
 
+## 打包 Windows exe
+
+```bash
+npm run dist                # 安装包 + 便携版
+npm run dist:portable       # 仅便携单文件
+```
+
+产物在 `release/`：
+
+| 文件 | 说明 |
+|------|------|
+| `UsetimeManager Setup 0.1.0.exe` | 安装包（桌面/开始菜单快捷方式） |
+| `UsetimeManager-0.1.0-portable.exe` | 便携版，双击即用，免安装 |
+| `win-unpacked/UsetimeManager.exe` | 未打包目录版，调试用 |
+
 ## 技术栈
 
 - Electron + React + TypeScript + Vite
