@@ -4,7 +4,10 @@ dist-electron/
 release/
 *.log
 run.log
+build-log*.txt
+build-err.txt
 preview.png
+*.tsbuildinfo
 .DS_Store
 Thumbs.db
 data/
