@@ -36,7 +36,7 @@ public partial class App : Application
 
         InitTray();
 
-        _mainWindow = new MainWindow(_store);
+        _mainWindow = new MainWindow(_store, _tracker!);
         MainWindow = _mainWindow;
         _mainWindow.Show();
     }
@@ -92,7 +92,9 @@ public partial class App : Application
     {
         if (_mainWindow == null)
         {
-            _mainWindow = new MainWindow(_store ?? new SessionStore());
+            var store = _store ?? new SessionStore();
+            var tracker = _tracker ?? new TrackerService(store);
+            _mainWindow = new MainWindow(store, tracker);
             MainWindow = _mainWindow;
         }
         _mainWindow.Show();

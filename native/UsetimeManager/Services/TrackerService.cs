@@ -1,16 +1,25 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 
 namespace UsetimeManager.Services;
 
-/// <summary>Win32 前台窗口采集</summary>
+/// <summary>
+/// Win32 前台窗口采集。
+/// 轮询 1 秒 + 前台切换事件双通道，减少短切换漏记；
+/// 进行中的会话可通过 GetCurrentSession() 参与统计。
+/// </summary>
 public sealed class TrackerService : IDisposable
 {
     private const uint ProcessQueryLimitedInformation = 0x1000;
-    private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(2000);
-    private static readonly TimeSpan FlushInterval = TimeSpan.FromSeconds(15);
+    private const uint EVENT_SYSTEM_FOREGROUND = 0x0003;
+    private const uint WINEVENT_OUTOFCONTEXT = 0x0000;
+
+    private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(1000);
+    private static readonly TimeSpan FlushInterval = TimeSpan.FromSeconds(10);
+    private const long MinSessionMs = 300;
 
     private readonly SessionStore _store;
     private readonly System.Threading.Timer _pollTimer;
@@ -19,6 +28,8 @@ public sealed class TrackerService : IDisposable
     private UsageSession? _current;
     private readonly object _gate = new();
     private bool _running;
+    private IntPtr _winEventHook = IntPtr.Zero;
+    private WinEventDelegate? _winEventProc; // 防止 GC 回收回调
 
     public bool IsRunning => _running;
 
@@ -36,6 +47,7 @@ public sealed class TrackerService : IDisposable
             if (_running) return;
             _running = true;
         }
+        InstallHook();
         Sample();
         _pollTimer.Change(PollInterval, PollInterval);
         _flushTimer.Change(FlushInterval, FlushInterval);
@@ -50,7 +62,35 @@ public sealed class TrackerService : IDisposable
         }
         _pollTimer.Change(Timeout.Infinite, Timeout.Infinite);
         _flushTimer.Change(Timeout.Infinite, Timeout.Infinite);
+        RemoveHook();
         CommitCurrent();
+    }
+
+    /// <summary>进行中的会话快照（尚未落库），供 UI 实时统计</summary>
+    public UsageSession? GetCurrentSession()
+    {
+        lock (_gate)
+        {
+            if (_current is null) return null;
+            return new UsageSession
+            {
+                StartTs = _current.StartTs,
+                EndTs = _current.EndTs,
+                ProcessName = _current.ProcessName,
+                ExePath = _current.ExePath,
+                WindowTitle = _current.WindowTitle
+            };
+        }
+    }
+
+    /// <summary>落库会话 + 进行中会话</summary>
+    public List<UsageSession> SnapshotAll()
+    {
+        var list = new List<UsageSession>(_store.Snapshot());
+        var cur = GetCurrentSession();
+        if (cur != null && cur.EndTs > cur.StartTs)
+            list.Add(cur);
+        return list;
     }
 
     private void Sample()
@@ -61,32 +101,37 @@ public sealed class TrackerService : IDisposable
 
         lock (_gate)
         {
-            var same = _current != null &&
-                       _current.ProcessName == info.Value.ProcessName &&
-                       _current.ExePath == info.Value.ExePath;
-
-            if (same)
-            {
-                if (!string.IsNullOrEmpty(info.Value.WindowTitle))
-                    _current!.WindowTitle = info.Value.WindowTitle;
-                _current!.EndTs = now;
-                return;
-            }
-
-            if (_current != null && _current.EndTs - _current.StartTs >= 1000)
-            {
-                _store.Add(_current);
-            }
-
-            _current = new UsageSession
-            {
-                StartTs = now,
-                EndTs = now,
-                ProcessName = info.Value.ProcessName,
-                ExePath = info.Value.ExePath,
-                WindowTitle = info.Value.WindowTitle
-            };
+            AcceptSample(info.Value.ProcessName, info.Value.ExePath, info.Value.WindowTitle, now);
         }
+    }
+
+    private void AcceptSample(string processName, string exePath, string windowTitle, long now)
+    {
+        var same = _current != null &&
+                   _current.ProcessName == processName &&
+                   _current.ExePath == exePath;
+
+        if (same)
+        {
+            if (!string.IsNullOrEmpty(windowTitle))
+                _current!.WindowTitle = windowTitle;
+            _current!.EndTs = now;
+            return;
+        }
+
+        if (_current != null && _current.EndTs - _current.StartTs >= MinSessionMs)
+        {
+            _store.Add(_current);
+        }
+
+        _current = new UsageSession
+        {
+            StartTs = now,
+            EndTs = now,
+            ProcessName = processName,
+            ExePath = exePath,
+            WindowTitle = windowTitle
+        };
     }
 
     private void FlushCurrent()
@@ -94,7 +139,7 @@ public sealed class TrackerService : IDisposable
         lock (_gate)
         {
             if (_current == null) return;
-            if (_current.EndTs - _current.StartTs < 500) return;
+            if (_current.EndTs - _current.StartTs < MinSessionMs) return;
             _store.Add(_current);
             _current.StartTs = _current.EndTs;
         }
@@ -105,12 +150,51 @@ public sealed class TrackerService : IDisposable
         lock (_gate)
         {
             if (_current == null) return;
-            if (_current.EndTs - _current.StartTs >= 500)
+            if (_current.EndTs - _current.StartTs >= MinSessionMs)
             {
                 _store.Add(_current);
             }
             _current = null;
         }
+    }
+
+    // ---- 前台切换钩子（补充轮询，降低漏记） ----
+    private delegate void WinEventDelegate(
+        IntPtr hWinEventHook, uint eventType, IntPtr hwnd,
+        int idObject, int idChild, uint dwEventThread, uint dwmsEventTime);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetWinEventHook(
+        uint eventMin, uint eventMax, IntPtr hmodWinEventProc,
+        WinEventDelegate lpfnWinEventProc, uint idProcess, uint idThread, uint dwFlags);
+
+    [DllImport("user32.dll")]
+    private static extern bool UnhookWinEvent(IntPtr hWinEventHook);
+
+    private void InstallHook()
+    {
+        if (_winEventHook != IntPtr.Zero) return;
+        _winEventProc = OnForegroundChanged;
+        _winEventHook = SetWinEventHook(
+            EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND,
+            IntPtr.Zero, _winEventProc, 0, 0, WINEVENT_OUTOFCONTEXT);
+    }
+
+    private void RemoveHook()
+    {
+        if (_winEventHook == IntPtr.Zero) return;
+        UnhookWinEvent(_winEventHook);
+        _winEventHook = IntPtr.Zero;
+        _winEventProc = null;
+    }
+
+    private void OnForegroundChanged(
+        IntPtr hWinEventHook, uint eventType, IntPtr hwnd,
+        int idObject, int idChild, uint dwEventThread, uint dwmsEventTime)
+    {
+        if (!_running) return;
+        // 事件回调里直接采样一次，避免等到下一次轮询
+        Sample();
     }
 
     public void Dispose()

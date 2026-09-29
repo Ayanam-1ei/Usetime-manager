@@ -19,10 +19,12 @@ public partial class MainWindow : Window
     private bool _sortByName;
     private readonly DispatcherTimer _refreshTimer;
     private readonly SessionStore _store;
+    private readonly TrackerService _tracker;
 
-    public MainWindow(SessionStore store)
+    public MainWindow(SessionStore store, TrackerService tracker)
     {
         _store = store;
+        _tracker = tracker;
         InitializeComponent();
         UpdateChrome();
         Loaded += (_, _) => RefreshData();
@@ -30,13 +32,11 @@ public partial class MainWindow : Window
 
         _refreshTimer = new DispatcherTimer
         {
-            Interval = TimeSpan.FromSeconds(15)
+            Interval = TimeSpan.FromSeconds(5)
         };
         _refreshTimer.Tick += (_, _) => RefreshData();
         _refreshTimer.Start();
     }
-
-    private SessionStore Store => _store;
 
     private void UpdateChrome()
     {
@@ -92,10 +92,8 @@ public partial class MainWindow : Window
 
     private void RefreshData()
     {
-        var store = Store;
-        if (store is null) return;
-
-        var sessions = store.Snapshot();
+        // 含「进行中会话」，避免统计不全
+        var sessions = _tracker.SnapshotAll();
         var stats = StatsService.Compute(sessions, _period, _date);
 
         SummaryTotal.Text = BarChart.FormatDuration(stats.TotalMs);
@@ -140,45 +138,72 @@ public partial class MainWindow : Window
         {
             var row = new DockPanel { Margin = new Thickness(0, 10, 0, 0) };
 
-            var icon = new Border
+            var iconBorder = new Border
             {
                 Width = 48,
                 Height = 48,
                 CornerRadius = new CornerRadius(12),
                 Background = (Brush)Application.Current.Resources["TrackBrush"],
-                Margin = new Thickness(0, 0, 14, 0)
+                Margin = new Thickness(0, 0, 14, 0),
+                ClipToBounds = true
             };
-            DockPanel.SetDock(icon, Dock.Left);
-            row.Children.Add(icon);
+            DockPanel.SetDock(iconBorder, Dock.Left);
+            row.Children.Add(iconBorder);
 
-            var letter = new TextBlock
+            var img = IconExtractor.GetIcon(item.ExePath);
+            if (img != null)
             {
-                Text = item.ProcessName.Length > 0 ? item.ProcessName[..1].ToUpper() : "?",
-                FontSize = 16,
-                FontWeight = FontWeights.Bold,
-                Foreground = (Brush)Application.Current.Resources["Ink2Brush"],
-                HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
-                VerticalAlignment = System.Windows.VerticalAlignment.Center
-            };
-            icon.Child = letter;
+                iconBorder.Child = new System.Windows.Controls.Image
+                {
+                    Source = img,
+                    Width = 36,
+                    Height = 36,
+                    Stretch = Stretch.Uniform
+                };
+            }
+            else
+            {
+                iconBorder.Child = new TextBlock
+                {
+                    Text = item.ProcessName.Length > 0 ? item.ProcessName[..1].ToUpper() : "?",
+                    FontSize = 16,
+                    FontWeight = FontWeights.Bold,
+                    Foreground = (Brush)Application.Current.Resources["Ink2Brush"],
+                    HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
+                    VerticalAlignment = System.Windows.VerticalAlignment.Center
+                };
+            }
 
-            var stack = new StackPanel();
-            var top = new DockPanel();
-            var timeText = new TextBlock
+            var stack = new StackPanel
             {
-                Text = BarChart.FormatDuration(item.TotalMs),
-                FontSize = 15,
-                Foreground = (Brush)Application.Current.Resources["Ink2Brush"]
+                HorizontalAlignment = System.Windows.HorizontalAlignment.Stretch
             };
-            DockPanel.SetDock(timeText, Dock.Right);
-            top.Children.Add(timeText);
-            top.Children.Add(new TextBlock
+            var top = new Grid();
+            top.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            top.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var nameText = new TextBlock
             {
                 Text = item.ProcessName,
                 FontSize = 17,
                 FontWeight = FontWeights.SemiBold,
-                Foreground = (Brush)Application.Current.Resources["InkBrush"]
-            });
+                Foreground = (Brush)Application.Current.Resources["InkBrush"],
+                TextTrimming = TextTrimming.CharacterEllipsis
+            };
+            Grid.SetColumn(nameText, 0);
+            top.Children.Add(nameText);
+
+            var timeText = new TextBlock
+            {
+                Text = BarChart.FormatDuration(item.TotalMs),
+                FontSize = 15,
+                Foreground = (Brush)Application.Current.Resources["Ink2Brush"],
+                Margin = new Thickness(12, 0, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            Grid.SetColumn(timeText, 1);
+            top.Children.Add(timeText);
+
             stack.Children.Add(top);
 
             var track = new Border
