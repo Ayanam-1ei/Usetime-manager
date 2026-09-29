@@ -1,0 +1,14 @@
+<Application x:Class="UsetimeManager.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ShutdownMode="OnExplicitShutdown">
+    <Application.Resources>
+        <SolidColorBrush x:Key="BgBrush" Color="#F2F3F7"/>
+        <SolidColorBrush x:Key="CardBrush" Color="#FFFFFF"/>
+        <SolidColorBrush x:Key="InkBrush" Color="#111827"/>
+        <SolidColorBrush x:Key="Ink2Brush" Color="#6B7280"/>
+        <SolidColorBrush x:Key="Ink3Brush" Color="#9CA3AF"/>
+        <SolidColorBrush x:Key="BlueBrush" Color="#2B6CFF"/>
+        <SolidColorBrush x:Key="TrackBrush" Color="#EEF0F5"/>
+    </Application.Resources>
+</Application>

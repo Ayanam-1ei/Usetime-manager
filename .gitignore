@@ -17,3 +17,10 @@ data/
 *.db-shm
 .vite/
 *.local
+
+native/**/bin/
+native/**/obj/
+native/**/publish/
+native/**/publish-sc/
+*.user
+native-preview.png
